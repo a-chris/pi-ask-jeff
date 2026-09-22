@@ -12,7 +12,8 @@
  *   (toggle with `advisor` in ~/.pi/agent/ask-jeff.json, default on).
  *
  * Transport: OpenRouter (default, uses OPENROUTER_API_KEY), TypeSafe
- * (TYPESAFE_API_KEY), or jev-agent (JEV_AGENT_KEY / jv_live_ keys).
+ * (TYPESAFE_API_KEY), jev-agent (JEV_AGENT_KEY / jv_live_ keys), or a local
+ * von server (ASK_JEFF_HOST=von, no key required on loopback).
  * All env-free options go in ~/.pi/agent/ask-jeff.json.
  */
 
@@ -29,7 +30,7 @@ import {
 /* Configuration                                                       */
 /* ------------------------------------------------------------------ */
 
-type Host = "typesafe" | "jev-agent" | "openrouter";
+type Host = "typesafe" | "jev-agent" | "openrouter" | "von";
 type QuestionKind = "noul" | "choice" | "score";
 
 interface JeffConfig {
@@ -82,7 +83,7 @@ function apiKeySource(): string {
 function resolveHost(): Host {
   if (cfg.host) return cfg.host;
   const h = env.ASK_JEFF_HOST;
-  if (h === "typesafe" || h === "jev-agent" || h === "openrouter") return h;
+  if (h === "typesafe" || h === "jev-agent" || h === "openrouter" || h === "von") return h;
   if (env.ASK_JEFF_API_KEY || env.TYPESAFE_API_KEY) return "typesafe";
   if (env.JEV_AGENT_KEY) return "jev-agent";
   if ((apiKey ?? "").startsWith("jv_live_")) return "jev-agent";
@@ -96,23 +97,37 @@ const HOST_ENDPOINTS: Record<Host, string> = {
   typesafe: "https://api.typesafe.ai/v1/systemone",
   "jev-agent": "https://jev-agent.com/api/v1/systemone",
   openrouter: "https://openrouter.ai/api/v1/systemone",
+  // Von: local open-source System One engine, same /v1/systemone contract.
+  // http is allowed for loopback only (see safeEndpointUrl).
+  von: "http://127.0.0.1:8000/v1/systemone",
 };
+
+/** Loopback hostnames — the only places an http:// endpoint is accepted. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+
+function isLoopbackUrl(u: URL | null): boolean {
+  if (!u) return false;
+  const hostname = u.hostname.replace(/^\[|\]$/g, "");
+  return LOOPBACK_HOSTS.has(hostname) || hostname.startsWith("127.") || hostname === "::1";
+}
 
 /**
  * Resolve the systemone endpoint.
  *
  * The LLM never controls this: the tool has no URL parameter. Only a
  * user-authored local override (~/.pi/agent/ask-jeff.json or ASK_JEFF_URL)
- * may replace the canonical endpoints, and it must parse as an https URL.
+ * may replace the canonical endpoints. https is always allowed; http is
+ * allowed only for loopback addresses (local engines such as von).
  * Invalid overrides never throw at load — they surface as a config problem
  * reported by the tool and /jeff.
  */
 const configProblems: string[] = [];
 
-function safeHttpsUrl(input: string, problem: string): URL | null {
+function safeEndpointUrl(input: string, problem: string): URL | null {
   try {
     const u = new URL(input);
-    if (u.protocol !== "https:") {
+    const ok = u.protocol === "https:" || (u.protocol === "http:" && isLoopbackUrl(u));
+    if (!ok) {
       configProblems.push(problem);
       return null;
     }
@@ -125,19 +140,34 @@ function safeHttpsUrl(input: string, problem: string): URL | null {
 
 function resolveEndpointUrl(): URL | null {
   const override = cfg.url ?? env.ASK_JEFF_URL;
-  if (override) return safeHttpsUrl(override, `url override "${override}" is not a valid https URL`);
-  return safeHttpsUrl(HOST_ENDPOINTS[host], `missing endpoint for host ${host}`);
+  if (override) {
+    return safeEndpointUrl(override, `url override "${override}" is not a valid endpoint (https, or http on loopback)`);
+  }
+  return safeEndpointUrl(HOST_ENDPOINTS[host], `missing endpoint for host ${host}`);
 }
 
 const resolvedConfig = {
   host,
   endpointUrl: resolveEndpointUrl(),
-  model: cfg.model ?? env.ASK_JEFF_MODEL ?? (host === "openrouter" ? "typesafe/jev-1.13" : "jev-latest"),
+  model:
+    cfg.model ??
+    env.ASK_JEFF_MODEL ??
+    (host === "openrouter" ? "typesafe/jev-1.13" : host === "von" ? "von-latest" : "jev-latest"),
   minConfidence: cfg.minConfidence ?? 0.6,
   stateCharLimit: cfg.stateCharLimit ?? 20000,
   timeoutMs: cfg.timeoutMs ?? 15000,
   advisorEnabled: cfg.advisor ?? true,
 };
+
+/** True when Jeff talks to a local engine (loopback) — no API key required. */
+const localEndpoint = isLoopbackUrl(resolvedConfig.endpointUrl);
+
+/**
+ * Key sent on the wire. Local endpoints get no ambient (OpenRouter/TypeSafe)
+ * key unless one is explicitly configured for Jeff; remote endpoints use the
+ * resolved key chain.
+ */
+const sendKey = localEndpoint ? (env.ASK_JEFF_API_KEY ?? cfg.apiKey ?? "") : (apiKey ?? "");
 
 /* ------------------------------------------------------------------ */
 /* Schema                                                              */
@@ -396,12 +426,11 @@ async function jevCall(
 
   try {
     for (let attempt = 0; ; attempt++) {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (sendKey) headers.authorization = `Bearer ${sendKey}`;
       const res = await fetch(endpointUrl, {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-        },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -435,7 +464,7 @@ function toolError(text: string, cause?: unknown): AgentToolResult<unknown> {
 }
 
 async function runAskJeff(params: AskJeffParams, signal?: AbortSignal): Promise<AgentToolResult<unknown>> {
-  if (!apiKey) {
+  if (!localEndpoint && !apiKey) {
     return toolError(
       "Jeff is not configured: no API key found. Set OPENROUTER_API_KEY (or ASK_JEFF_API_KEY, TYPESAFE_API_KEY, JEV_AGENT_KEY, or apiKey in ~/.pi/agent/ask-jeff.json). Run /jeff for status.",
     );
@@ -583,14 +612,55 @@ function lastCallCount(ctx: { sessionManager: { getBranch(): ReadonlyArray<{ typ
   }
 }
 
+export interface JeffResolvedInfo {
+  host: Host;
+  url: string | null;
+  model: string;
+  keyPresent: boolean;
+  keySource: string;
+  keyRequired: boolean;
+  localEndpoint: boolean;
+  minConfidence: number;
+  stateCharLimit: number;
+  timeoutMs: number;
+  advisorEnabled: boolean;
+  configProblems: string[];
+}
+
+/** Resolved configuration facts — used by /jeff status and by tests. */
+export function jeffResolvedInfo(): JeffResolvedInfo {
+  return {
+    host,
+    url: resolvedConfig.endpointUrl?.toString() ?? null,
+    model: resolvedConfig.model,
+    keyPresent: !!apiKey,
+    keySource: apiKeySource(),
+    keyRequired: !localEndpoint && !!resolvedConfig.endpointUrl,
+    localEndpoint,
+    minConfidence: resolvedConfig.minConfidence,
+    stateCharLimit: resolvedConfig.stateCharLimit,
+    timeoutMs: resolvedConfig.timeoutMs,
+    advisorEnabled: resolvedConfig.advisorEnabled,
+    configProblems: [...configProblems],
+  };
+}
+
 export function buildStatusText(contextLines: { calls: number }): string {
-  const source = apiKeySource();
+  const info = jeffResolvedInfo();
+  let keyLine: string;
+  if (info.keySource) {
+    keyLine = `key: found (${info.keySource})`;
+  } else if (info.localEndpoint) {
+    keyLine = "key: not required (local von endpoint)";
+  } else {
+    keyLine = "MISSING — set OPENROUTER_API_KEY, TYPESAFE_API_KEY, JEV_AGENT_KEY, ASK_JEFF_API_KEY, or apiKey in ~/.pi/agent/ask-jeff.json";
+  }
   return [
     "pi-ask-jeff — Jeff advisor",
-    `key: ${source ? `found (${source})` : "MISSING — set OPENROUTER_API_KEY, TYPESAFE_API_KEY, JEV_AGENT_KEY, ASK_JEFF_API_KEY, or apiKey in ~/.pi/agent/ask-jeff.json"}`,
-    `host: ${host} → ${resolvedConfig.endpointUrl?.toString() ?? "(invalid config)"}`,
-    `model: ${resolvedConfig.model}`,
-    `minConfidence: ${resolvedConfig.minConfidence} (${percent(resolvedConfig.minConfidence)}) · stateCharLimit: ${resolvedConfig.stateCharLimit} chars · timeout: ${resolvedConfig.timeoutMs}ms · advisor section: ${resolvedConfig.advisorEnabled ? "on" : "off"}`,
+    keyLine,
+    `host: ${info.host} → ${info.url ?? "(invalid config)"}`,
+    `model: ${info.model}`,
+    `minConfidence: ${info.minConfidence} (${percent(info.minConfidence)}) · stateCharLimit: ${info.stateCharLimit} chars · timeout: ${info.timeoutMs}ms · advisor section: ${info.advisorEnabled ? "on" : "off"}`,
     `ask_jeff calls this session: ${contextLines.calls}`,
   ].join("\n");
 }
@@ -627,7 +697,7 @@ export default function askJeffExtension(pi: ExtensionAPI) {
       };
 
       if (trimmed === "test") {
-        if (!apiKey) {
+        if (!localEndpoint && !apiKey) {
           say("Jeff is not configured: no API key found. Set OPENROUTER_API_KEY etc. and reload.");
           return;
         }

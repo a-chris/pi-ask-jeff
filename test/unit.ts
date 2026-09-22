@@ -7,6 +7,7 @@ import {
   buildJevQuestions,
   buildStatusText,
   capState,
+  jeffResolvedInfo,
   renderRows,
 } from "../extensions/index.ts";
 
@@ -125,6 +126,17 @@ const status = buildStatusText({ calls: 3 });
 check("status mentions host", status.includes("host:"));
 check("status shows percentage threshold", status.includes("minConfidence: 0.6 (60%)"));
 check("status counts calls", status.includes("calls this session: 3"));
+
+/* ---------- resolved info (default environment) ---------- */
+
+const info = jeffResolvedInfo();
+check("default model on openrouter host", info.model === "typesafe/jev-1.13");
+check("resolved url is the openrouter systemone endpoint", info.url === "https://openrouter.ai/api/v1/systemone");
+check("minConfidence default 0.6", info.minConfidence === 0.6);
+check("advisor on by default", info.advisorEnabled === true);
+check("no config problems by default", info.configProblems.length === 0);
+check("remote endpoint requires a key", info.keyRequired === true);
+check("localEndpoint false on remote host", info.localEndpoint === false);
 
 console.log(failed === 0 ? "\nAll unit checks passed" : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);

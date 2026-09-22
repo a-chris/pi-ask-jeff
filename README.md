@@ -22,7 +22,7 @@ cannot read your files, see your chat, or remember anything. What you put in
 agent (pi) ── call ask_jeff({ state, questions: [...] })
       │
       ▼
-Jev System One API  { state, questions }   (transported via OpenRouter / TypeSafe / jev-agent)
+Jev System One API  { state, questions }   (transported via OpenRouter / TypeSafe / jev-agent / local von)
       │
       ▼
 verdicts + calibrated confidence  →  rendered as plain text, no internals
@@ -80,7 +80,8 @@ export OPENROUTER_API_KEY=sk-or-v1-...    # already set on this machine
 
 Also supported: `TYPESAFE_API_KEY` (api.typesafe.ai) and `JEV_AGENT_KEY`
 (free `jv_live_` key from jev-agent.com). Host is auto-detected from which key
-is set; override with `ASK_JEFF_HOST` or `host` in the config file.
+is set; override with `ASK_JEFF_HOST` or `host` in the config file. A **local
+von server** needs no key at all — see below.
 
 ## Configuration
 
@@ -89,7 +90,7 @@ Environment variables (highest precedence):
 | var | meaning |
 |-----|---------|
 | `ASK_JEFF_API_KEY` / `TYPESAFE_API_KEY` / `JEV_AGENT_KEY` / `OPENROUTER_API_KEY` | API key (first one set wins) |
-| `ASK_JEFF_HOST` | `typesafe` \| `jev-agent` \| `openrouter` |
+| `ASK_JEFF_HOST` | `typesafe` \| `jev-agent` \| `openrouter` \| `von` |
 | `ASK_JEFF_URL` | full systemone endpoint override (https only) |
 | `ASK_JEFF_MODEL` | model id (default: `typesafe/jev-1.13` on openrouter, `jev-latest` elsewhere) |
 
@@ -112,6 +113,26 @@ Environment variables (highest precedence):
   action" rule, expressed in plain confidence.
 - `stateCharLimit` — hard cap on state length (the backend budget is 32k tokens).
 - `advisor` — toggle the `<jeff-advisor>` system prompt section.
+
+## Local von server
+
+[Von](https://github.com/wfzyx/von) is an open-source, locally hosted System
+One engine exposing the same `/v1/systemone` contract (yes/no, pick-one,
+rate-on-scale + confidence). Point Jeff at it:
+
+```bash
+von serve                        # default http://127.0.0.1:8000
+ASK_JEFF_HOST=von pi            # or "host": "von" in ask-jeff.json
+```
+
+- **No API key needed on loopback** — the extension sends no ambient
+  (OpenRouter/TypeSafe) key to localhost. `/jeff` shows `key: not required
+  (local von endpoint)`.
+- If your von server enforces a key (server-side `VON_API_KEY`), set
+  `ASK_JEFF_API_KEY` (or `apiKey`) to the same value.
+- Custom port: `ASK_JEFF_URL=http://127.0.0.1:8123/v1/systemone` — `http:` is
+  accepted only for loopback addresses.
+- Model defaults to `von-latest` (override with `ASK_JEFF_MODEL` or `model`).
 
 ## Using it
 
@@ -193,9 +214,10 @@ npx -y -p typescript tsc -p tsconfig.json   # type check
 
 ## Notes / future
 
-- Transport: OpenRouter (default), TypeSafe, jev-agent — all the same contract
-  behind one extension. A URL override (`ASK_JEFF_URL`) is validated https at
-  load; the LLM can never choose the endpoint.
+- Transport: OpenRouter (default), TypeSafe, jev-agent, or a local **von**
+  server — all the same contract behind one extension. A URL override
+  (`ASK_JEFF_URL`) is validated at load (https anywhere, http only on
+  loopback); the LLM can never choose the endpoint.
 - Optional v2: a "Jeff gate" that intercepts the agent when it tries to
   conclude (task done / delegate) and forces an `ask_jeff` check first.
 - The caller never sees Jev internals (`noul`/`choice`/`score`, probabilities,
