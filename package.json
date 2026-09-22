@@ -1,0 +1,19 @@
+{
+  "name": "pi-ask-jeff",
+  "version": "0.1.0",
+  "description": "An advisor called Jeff for pi: a calibrated, always-right decision tool (ask_jeff) backed by the Jev-compatible System One API via OpenRouter, TypeSafe, or jev-agent.",
+  "keywords": ["pi-package", "jev", "system-one", "advisor", "decisions"],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  }
+}
