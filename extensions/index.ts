@@ -102,7 +102,7 @@ const HOST_ENDPOINTS: Record<Host, string> = {
   von: "http://127.0.0.1:8000/v1/systemone",
 };
 
-/** Loopback hostnames — the only places an http:// endpoint is accepted. */
+/** Loopback hostnames — always trusted for http. */
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 
 function isLoopbackUrl(u: URL | null): boolean {
@@ -111,22 +111,37 @@ function isLoopbackUrl(u: URL | null): boolean {
   return LOOPBACK_HOSTS.has(hostname) || hostname.startsWith("127.") || hostname === "::1";
 }
 
+/** RFC1918 private ranges — a local/LAN engine (e.g. von on a home server). */
+function isPrivateLanHost(hostname: string): boolean {
+  if (/^10\./.test(hostname)) return true;
+  if (/^192\.168\./.test(hostname)) return true;
+  return /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+}
+
+/** http allowed on loopback or private LAN; https allowed everywhere. */
+function httpAllowed(u: URL): boolean {
+  if (isLoopbackUrl(u)) return true;
+  const hostname = u.hostname.replace(/^\[|\]$/g, "");
+  return isPrivateLanHost(hostname);
+}
+
 /**
  * Resolve the systemone endpoint.
  *
  * The LLM never controls this: the tool has no URL parameter. Only a
  * user-authored local override (~/.pi/agent/ask-jeff.json or ASK_JEFF_URL)
  * may replace the canonical endpoints. https is always allowed; http is
- * allowed only for loopback addresses (local engines such as von).
- * Invalid overrides never throw at load — they surface as a config problem
- * reported by the tool and /jeff.
+ * allowed only for loopback and private LAN addresses (local engines such
+ * as von); http to a public internet address is rejected. Invalid overrides
+ * never throw at load — they surface as a config problem reported by the
+ * tool and /jeff.
  */
 const configProblems: string[] = [];
 
 function safeEndpointUrl(input: string, problem: string): URL | null {
   try {
     const u = new URL(input);
-    const ok = u.protocol === "https:" || (u.protocol === "http:" && isLoopbackUrl(u));
+    const ok = u.protocol === "https:" || (u.protocol === "http:" && httpAllowed(u));
     if (!ok) {
       configProblems.push(problem);
       return null;
@@ -141,7 +156,10 @@ function safeEndpointUrl(input: string, problem: string): URL | null {
 function resolveEndpointUrl(): URL | null {
   const override = cfg.url ?? env.ASK_JEFF_URL;
   if (override) {
-    return safeEndpointUrl(override, `url override "${override}" is not a valid endpoint (https, or http on loopback)`);
+    return safeEndpointUrl(
+      override,
+      `url override "${override}" is not a valid endpoint (https, or http on loopback/private LAN)`,
+    );
   }
   return safeEndpointUrl(HOST_ENDPOINTS[host], `missing endpoint for host ${host}`);
 }
@@ -159,8 +177,8 @@ const resolvedConfig = {
   advisorEnabled: cfg.advisor ?? true,
 };
 
-/** True when Jeff talks to a local engine (loopback) — no API key required. */
-const localEndpoint = isLoopbackUrl(resolvedConfig.endpointUrl);
+/** True when Jeff talks over plaintext http (loopback or private LAN) — no API key required, no ambient key sent. */
+const localEndpoint = (resolvedConfig.endpointUrl?.protocol ?? "") === "http:";
 
 /**
  * Key sent on the wire. Local endpoints get no ambient (OpenRouter/TypeSafe)
@@ -619,6 +637,7 @@ export interface JeffResolvedInfo {
   keyPresent: boolean;
   keySource: string;
   keyRequired: boolean;
+  /** True when the endpoint is plaintext http (loopback or private LAN). */
   localEndpoint: boolean;
   minConfidence: number;
   stateCharLimit: number;
@@ -651,7 +670,7 @@ export function buildStatusText(contextLines: { calls: number }): string {
   if (info.keySource) {
     keyLine = `key: found (${info.keySource})`;
   } else if (info.localEndpoint) {
-    keyLine = "key: not required (local von endpoint)";
+    keyLine = "key: not required (plaintext http endpoint)";
   } else {
     keyLine = "MISSING — set OPENROUTER_API_KEY, TYPESAFE_API_KEY, JEV_AGENT_KEY, ASK_JEFF_API_KEY, or apiKey in ~/.pi/agent/ask-jeff.json";
   }

@@ -91,7 +91,7 @@ Environment variables (highest precedence):
 |-----|---------|
 | `ASK_JEFF_API_KEY` / `TYPESAFE_API_KEY` / `JEV_AGENT_KEY` / `OPENROUTER_API_KEY` | API key (first one set wins) |
 | `ASK_JEFF_HOST` | `typesafe` \| `jev-agent` \| `openrouter` \| `von` |
-| `ASK_JEFF_URL` | full systemone endpoint override (https only) |
+| `ASK_JEFF_URL` | full systemone endpoint override (https, or http on loopback/private LAN) |
 | `ASK_JEFF_MODEL` | model id (default: `typesafe/jev-1.13` on openrouter, `jev-latest` elsewhere) |
 
 `~/.pi/agent/ask-jeff.json` (everything optional):
@@ -125,13 +125,16 @@ von serve                        # default http://127.0.0.1:8000
 ASK_JEFF_HOST=von pi            # or "host": "von" in ask-jeff.json
 ```
 
-- **No API key needed on loopback** — the extension sends no ambient
-  (OpenRouter/TypeSafe) key to localhost. `/jeff` shows `key: not required
-  (local von endpoint)`.
+- **No API key needed on plaintext http endpoints** (loopback *or* private LAN)
+  — the extension sends no ambient (OpenRouter/TypeSafe) key over http.
+  `/jeff` shows `key: not required (plaintext http endpoint)`.
 - If your von server enforces a key (server-side `VON_API_KEY`), set
   `ASK_JEFF_API_KEY` (or `apiKey`) to the same value.
-- Custom port: `ASK_JEFF_URL=http://127.0.0.1:8123/v1/systemone` — `http:` is
-  accepted only for loopback addresses.
+- **Shared von on your LAN**: `http:` is accepted on loopback and RFC1918
+  private ranges (`10.x`, `172.16–31.x`, `192.168.x`) — e.g.
+  `ASK_JEFF_URL=http://192.168.1.56:8000/v1/systemone`. http to public
+  internet addresses is rejected.
+- Custom loopback port: `ASK_JEFF_URL=http://127.0.0.1:8123/v1/systemone`.
 - Model defaults to `von-latest` (override with `ASK_JEFF_MODEL` or `model`).
 
 ## Using it
