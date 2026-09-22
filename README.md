@@ -211,7 +211,8 @@ empirically.
 ## Development
 
 ```bash
-node test/unit.ts          # pure-helper smoke tests (no network)
+node test/unit.ts            # pure-helper smoke tests (no network)
+node test/compare.ts         # bare-HTTP von vs Jev comparison on 10 grounded use cases → test/compare-results.md
 npx -y -p typescript tsc -p tsconfig.json   # type check
 ```
 
