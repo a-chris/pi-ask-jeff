@@ -27,7 +27,7 @@ Jev System One API  { state, questions }   (transported via OpenRouter / TypeSaf
       ▼
 verdicts + calibrated confidence  →  rendered as plain text, no internals
       │
-      └── every call is logged to the session (audit trail)
+      └── every call is logged to the session + ~/.pi/agent/ask-jeff-log.jsonl (audit trail)
 ```
 
 You never name a response type. Jeff infers it from what you provide:
@@ -245,6 +245,13 @@ Each `ask_jeff` call is appended to the session as an `ask-jeff` entry
 (state length, questions, answers, model, tokens, low-confidence flags). It
 survives restarts and gives you labelled data to tune `minConfidence`
 empirically.
+
+Every API attempt — including transport failures — is also appended to a
+central, session-independent ledger at `~/.pi/agent/ask-jeff-log.jsonl`, one
+JSON line per call (`ok`, `host`, `model`, `careful`, `questions`, `answers`,
+`usage`, `lowConfidence`, `latencyMs`, and `error` on failure). Greppable in
+one place; the API key is never logged. Config/validation errors before any
+request is made are not logged — only actual API attempts.
 
 ## Development
 

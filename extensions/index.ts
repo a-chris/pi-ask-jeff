@@ -17,7 +17,7 @@
  * All env-free options go in ~/.pi/agent/ask-jeff.json.
  */
 
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import {
@@ -539,6 +539,27 @@ async function jevCall(
 }
 
 /* ------------------------------------------------------------------ */
+/* Request log                                                         */
+/* ------------------------------------------------------------------ */
+
+/** Central append-only ledger of every Jeff API attempt — successes and
+ *  failures alike — in one file, unlike the per-session `ask-jeff` entry.
+ *  Never contains the API key. */
+export function jeffLogPath(): string {
+  return join(getAgentDir(), "ask-jeff-log.jsonl");
+}
+
+/** Append one JSON line (`ts` is stamped by default). Best-effort:
+ *  logging must never break the tool. */
+export function appendJeffLog(entry: Record<string, unknown>, file = jeffLogPath()): void {
+  try {
+    appendFileSync(file, `${JSON.stringify({ ts: Date.now(), ...entry })}\n`);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Tool                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -579,7 +600,12 @@ async function runAskJeff(params: AskJeffParams, signal?: AbortSignal): Promise<
   const { state, truncated, dropped } = capState(params.state, resolvedConfig.stateCharLimit);
   const questionIds = params.questions.map((q, i) => (q.id ?? "").trim() || `q${i + 1}`);
   const frames = params.careful === true ? CAREFUL_FRAMES : [""];
+  const careful = frames.length > 1;
   const started = Date.now();
+  const questionLog = params.questions.map((q) => ({
+    id: q.id,
+    instructions: q.instructions.slice(0, 400),
+  }));
 
   let runs: JevResponse[];
   try {
@@ -587,11 +613,23 @@ async function runAskJeff(params: AskJeffParams, signal?: AbortSignal): Promise<
       frames.map((frame) => jevCall(state, buildJevQuestions(params.questions, frame), signal)),
     );
   } catch (err) {
-    return toolError(err instanceof Error ? err.message : String(err), err);
+    const error = err instanceof Error ? err.message : String(err);
+    appendJeffLog({
+      ok: false,
+      host,
+      url: resolvedConfig.endpointUrl?.toString() ?? null,
+      model: resolvedConfig.model,
+      careful,
+      stateChars: state.length,
+      truncated,
+      questions: questionLog,
+      error,
+      latencyMs: Date.now() - started,
+    });
+    return toolError(error, err);
   }
 
   const latencyMs = Date.now() - started;
-  const careful = frames.length > 1;
   let answers: Record<string, JevAnswer>;
   let consensus: Record<string, number> | undefined;
   if (careful) {
@@ -630,10 +668,7 @@ async function runAskJeff(params: AskJeffParams, signal?: AbortSignal): Promise<
       truncated,
       careful,
       consensus,
-      questions: params.questions.map((q) => ({
-        id: q.id,
-        instructions: q.instructions.slice(0, 400),
-      })),
+      questions: questionLog,
       answers,
       usage,
       lowConfidence: lows.map((r) => r.id),
@@ -642,6 +677,23 @@ async function runAskJeff(params: AskJeffParams, signal?: AbortSignal): Promise<
   } catch {
     /* session persistence is best-effort */
   }
+
+  // Central ledger: survives session pruning, includes failures, greppable in one place.
+  appendJeffLog({
+    ok: true,
+    host,
+    url: resolvedConfig.endpointUrl.toString(),
+    model: runs[0].model ?? resolvedConfig.model,
+    careful,
+    consensus,
+    stateChars: state.length,
+    truncated,
+    questions: questionLog,
+    answers,
+    usage,
+    lowConfidence: lows.map((r) => r.id),
+    latencyMs,
+  });
 
   return {
     content: [{ type: "text", text: text.join("\n") }],

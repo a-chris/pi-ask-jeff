@@ -5,12 +5,17 @@
 import {
   aggregateCareful,
   answerConfidence,
+  appendJeffLog,
   buildJevQuestions,
   buildStatusText,
   capState,
+  jeffLogPath,
   jeffResolvedInfo,
   renderRows,
 } from "../extensions/index.ts";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let failed = 0;
 function check(label: string, cond: boolean) {
@@ -187,6 +192,31 @@ check("score consensus 2/3", agg3.consensus.s === 2);
 
 const aggEmpty = aggregateCareful([{ a: { type: "noul", noul: 0.5 } }], ["missing"]);
 check("missing question ids are skipped", Object.keys(aggEmpty.answers).length === 0);
+
+/* ---------- appendJeffLog: central request ledger ---------- */
+
+check("log path lives in agent dir", jeffLogPath().endsWith("ask-jeff-log.jsonl"));
+const logDir = mkdtempSync(join(tmpdir(), "jeff-log-"));
+const logFile = join(logDir, "ask-jeff-log.jsonl");
+appendJeffLog({ ok: false, error: "boom", latencyMs: 12 }, logFile);
+appendJeffLog({ ok: true, answers: { done: { type: "noul", noul: 0.9 } }, latencyMs: 5 }, logFile);
+const logLines = readFileSync(logFile, "utf8")
+  .trim()
+  .split("\n")
+  .map((l) => JSON.parse(l) as Record<string, unknown>);
+check("log: two JSON lines written", logLines.length === 2);
+check("log: ts stamped automatically", typeof logLines[0].ts === "number");
+check("log: failures and successes both recorded", logLines[0].ok === false && logLines[1].ok === true);
+check("log: failure keeps error message", logLines[0].error === "boom");
+check("log: each line is standalone JSON", Object.keys(logLines[1]).includes("answers"));
+let logThrew = false;
+try {
+  appendJeffLog({ ok: true }, join(logDir, "no-such-dir", "x.jsonl"));
+} catch {
+  logThrew = true;
+}
+check("log: unwritable path never throws", !logThrew);
+rmSync(logDir, { recursive: true, force: true });
 
 console.log(failed === 0 ? "\nAll unit checks passed" : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);
