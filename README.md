@@ -193,6 +193,9 @@ Rating on a scale:
 - **Declarative**: `"tests: 47/47 pass"` beats `"please check the tests"`.
 - **Mark unknowns**: `"FACT UNKNOWN: whether CI passed"` instead of omitting.
 - **Separate opinion**: `"SELF-ASSESSMENT: I believe it works"`.
+- **Do the math for Jeff**: state conclusions as facts (`"contrast 2.6:1 vs required 4.5:1 -> contrast fails"`) instead of asking it to compare numbers. This was the single biggest accuracy win for a small local engine in the reliability experiment (6/10 → 9/10).
+- **Spell the decision rule**: for "pick one", say what the immediate situation demands; for incident gates, state the standard practice.
+- **Provide rubrics on yes/no questions** (`criteria`): they raise confidence (`done2` 66→85%, `urgent` 61→91% in the experiment).
 
 ## Confidence rule
 
@@ -200,6 +203,41 @@ Every answer is a verdict with a calibrated confidence percentage. Act on
 answers at or above `minConfidence` (≥ 60% by default); when a call is flagged
 `⚠ LOW CONFIDENCE`, verify before acting — and say so. A strong-looking
 `No — confidence 95%` means Jeff is 95% sure the answer is No, not 95% done.
+
+## careful mode (high-stakes)
+
+Set `"careful": true` on a call to trade 3× requests for a majority-vote
+verdict:
+
+```json
+{
+  "careful": true,
+  "state": "...",
+  "questions": [
+    { "id": "done", "instructions": "Is this task completed per its definition?" },
+    { "id": "next", "instructions": "Who handles the next step?", "options": ["ops", "dev", "qa"] }
+  ]
+}
+```
+
+Each question is asked through 3 procedural framings and aggregated: median
+probability for yes/no, majority label for pick-one, majority level for
+ratings. Outputs carry a consensus marker:
+
+```text
+done: No (consensus 3/3) — confidence 93%
+risk: 0.8 on Low → Medium → High (consensus 2/3) — confidence 47%
+```
+
+A split vote (`2/3`) tells you the backend was genuinely torn — weigh that
+before acting. This is the reliability machine from `test/von-experiment.ts`
+(6/10 → 10/10 locally) folded into the tool.
+
+Honest caveat: these engines are deterministic per input, so the procedural
+framings produce limited diversity for already-stable answers — the big win in
+the experiment came from *state-level* rewording (which the extension cannot
+do safely). careful still rescues borderline flip-flops and surfaces exact
+agreement, so use it for completion gates, delegation, and incident choices.
 
 ## Audit trail
 

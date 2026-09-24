@@ -232,6 +232,8 @@ const paramsSchema = Type.Object(
     state: Type.String({ minLength: 1 }),
     /** One or more independent decisions, evaluated in parallel against the same state. */
     questions: Type.Array(questionSchema, { minItems: 1, maxItems: 10 }),
+    /** High-stakes mode: ask each question through 3 procedural framings and majority-vote. Costs 3 requests. */
+    careful: Type.Optional(Type.Boolean({ description: "3-framing majority vote for high-stakes decisions" })),
   },
   { additionalProperties: false },
 );
@@ -276,7 +278,7 @@ interface JevResponse {
 /* Pure helpers (exported for tests)                                   */
 /* ------------------------------------------------------------------ */
 
-export function buildJevQuestions(questions: AskJeffQuestion[]): Record<string, JevQuestion> {
+export function buildJevQuestions(questions: AskJeffQuestion[], suffix = ""): Record<string, JevQuestion> {
   const used = new Set<string>();
   const out: Record<string, JevQuestion> = {};
   questions.forEach((q, i) => {
@@ -285,13 +287,14 @@ export function buildJevQuestions(questions: AskJeffQuestion[]): Record<string, 
     let n = 2;
     while (used.has(id)) id = `${base}_${n++}`;
     used.add(id);
-    out[id] = toJevQuestion(q);
+    out[id] = toJevQuestion(q, suffix);
   });
   return out;
 }
 
 /** Infer the Jev question shape from what the caller provides — the caller never names it. */
-function toJevQuestion(q: AskJeffQuestion): JevQuestion {
+function toJevQuestion(q: AskJeffQuestion, suffix: string): JevQuestion {
+  const instructions = `${q.instructions}${suffix}`;
   if (q.options && q.levels) {
     throw new Error(`Question "${q.id ?? "?"}": provide options (pick one) OR levels (rate on a scale), not both.`);
   }
@@ -304,19 +307,19 @@ function toJevQuestion(q: AskJeffQuestion): JevQuestion {
       }
       criteria[label] = typeof o === "string" ? null : (o.description ?? null);
     }
-    return { type: "choice", instructions: q.instructions, criteria };
+    return { type: "choice", instructions, criteria };
   }
   if (q.levels) {
-    return { type: "score", instructions: q.instructions, criteria: q.levels };
+    return { type: "score", instructions, criteria: q.levels };
   }
   if (q.criteria?.true || q.criteria?.false) {
     return {
       type: "noul",
-      instructions: q.instructions,
+      instructions,
       criteria: { true: q.criteria.true ?? "", false: q.criteria.false ?? "" },
     };
   }
-  return { type: "noul", instructions: q.instructions };
+  return { type: "noul", instructions };
 }
 
 export function capState(state: string, limit: number): { state: string; truncated: boolean; dropped: number } {
@@ -374,6 +377,71 @@ export function renderRows(answers: Record<string, JevAnswer>, minConfidence = 0
     const conf = a.confidence ?? 1;
     return { id, line: `${id}: ${formatScore(a.score)}${scale} — confidence ${percent(conf)}`, confidence: conf };
   });
+}
+
+/** Procedural framings used by careful mode — same facts, re-worded question. */
+const CAREFUL_FRAMES = [
+  "",
+  " Answer only from the facts stated above.",
+  " Weigh every fact in the state equally before answering.",
+];
+
+/**
+ * Majority-vote aggregation across framing runs (careful mode).
+ * These models are deterministic per input, so the only variance source is
+ * the wording; a majority verdict across framings is the robust pick, and a
+ * split vote (2/3) is flagged so the caller knows reliability is lower.
+ */
+export function aggregateCareful(
+  runs: Array<Record<string, JevAnswer>>,
+  questionIds: string[],
+): { answers: Record<string, JevAnswer>; consensus: Record<string, number> } {
+  const answers: Record<string, JevAnswer> = {};
+  const consensus: Record<string, number> = {};
+  for (const qid of questionIds) {
+    const present = runs.map((r) => r[qid]).filter((a): a is JevAnswer => !!a);
+    if (present.length === 0) continue;
+
+    if (present[0].type === "noul") {
+      const ps = (present as JevNoulAnswer[]).map((a) => a.noul).sort((a, b) => a - b);
+      const mid = Math.floor(ps.length / 2);
+      const median = ps.length % 2 === 1 ? (ps[mid] as number) : ((ps[mid - 1] as number) + (ps[mid] as number)) / 2;
+      const majorityVerdict = median >= 0.5 ? "Yes" : "No";
+      const votes = (present as JevNoulAnswer[]).filter(
+        (a) => (a.noul >= 0.5 ? "Yes" : "No") === majorityVerdict,
+      ).length;
+      answers[qid] = { type: "noul", noul: median };
+      consensus[qid] = votes;
+    } else if (present[0].type === "choice") {
+      const byLabel = new Map<string, { conf: number; count: number }>();
+      const globalProb: Record<string, number> = {};
+      for (const a of present as JevChoiceAnswer[]) {
+        const cur = byLabel.get(a.choice) ?? { conf: 0, count: 0 };
+        cur.count += 1;
+        cur.conf += a.confidence ?? 1;
+        byLabel.set(a.choice, cur);
+        for (const [k, v] of Object.entries(a.probabilities ?? {})) globalProb[k] = (globalProb[k] ?? 0) + v;
+      }
+      const winner = [...byLabel.entries()].sort((x, y) => y[1].count - x[1].count || y[1].conf - x[1].conf)[0];
+      const [label, stat] = winner as [string, { conf: number; count: number }];
+      const probabilities: Record<string, number> = {};
+      for (const [k, v] of Object.entries(globalProb)) probabilities[k] = v / present.length;
+      answers[qid] = { type: "choice", choice: label, probabilities, confidence: stat.conf / stat.count };
+      consensus[qid] = stat.count;
+    } else {
+      const scores = present as JevScoreAnswer[];
+      const levels = scores.map((a) => Math.round(a.score));
+      const counts = new Map<number, number>();
+      for (const lv of levels) counts.set(lv, (counts.get(lv) ?? 0) + 1);
+      const level = [...counts.entries()].sort((x, y) => y[1] - x[1] || x[0] - y[0])[0][0];
+      const votes = levels.filter((lv) => lv === level).length;
+      const meanScore = scores.reduce((s, a) => s + a.score, 0) / scores.length;
+      const meanConf = scores.reduce((s, a) => s + (a.confidence ?? 1), 0) / scores.length;
+      answers[qid] = { type: "score", score: meanScore, legend: scores[0].legend, confidence: meanConf };
+      consensus[qid] = votes;
+    }
+  }
+  return { answers, consensus };
 }
 
 /* ------------------------------------------------------------------ */
@@ -509,22 +577,40 @@ async function runAskJeff(params: AskJeffParams, signal?: AbortSignal): Promise<
   }
 
   const { state, truncated, dropped } = capState(params.state, resolvedConfig.stateCharLimit);
-  const questions = buildJevQuestions(params.questions);
+  const questionIds = params.questions.map((q, i) => (q.id ?? "").trim() || `q${i + 1}`);
+  const frames = params.careful === true ? CAREFUL_FRAMES : [""];
   const started = Date.now();
 
-  let data: JevResponse;
+  let runs: JevResponse[];
   try {
-    data = await jevCall(state, questions, signal);
+    runs = await Promise.all(
+      frames.map((frame) => jevCall(state, buildJevQuestions(params.questions, frame), signal)),
+    );
   } catch (err) {
     return toolError(err instanceof Error ? err.message : String(err), err);
   }
 
   const latencyMs = Date.now() - started;
-  const rows = renderRows(data.answers ?? {}, resolvedConfig.minConfidence);
-  const lows = rows.filter((r) => r.confidence < resolvedConfig.minConfidence);
-  const usage = data.usage ?? {};
+  const careful = frames.length > 1;
+  let answers: Record<string, JevAnswer>;
+  let consensus: Record<string, number> | undefined;
+  if (careful) {
+    const agg = aggregateCareful(runs.map((r) => r.answers ?? {}), questionIds);
+    answers = agg.answers;
+    consensus = agg.consensus;
+  } else {
+    answers = runs[0].answers ?? {};
+  }
 
-  const text = [...rows.map((r) => r.line)];
+  const rows = renderRows(answers, resolvedConfig.minConfidence);
+  const lows = rows.filter((r) => r.confidence < resolvedConfig.minConfidence);
+  const usage = runs[0].usage ?? {};
+
+  const text = rows.map((r) => {
+    const marker =
+      consensus && consensus[r.id] !== undefined ? ` (consensus ${consensus[r.id]}/${runs.length})` : "";
+    return r.line.replace(" — confidence", `${marker} — confidence`);
+  });
   if (truncated) text.push(`\n(state truncated to ${resolvedConfig.stateCharLimit} chars; ${dropped} chars dropped)`);
   if (lows.length > 0) {
     text.push(
@@ -539,14 +625,16 @@ async function runAskJeff(params: AskJeffParams, signal?: AbortSignal): Promise<
       ts: Date.now(),
       host,
       url: resolvedConfig.endpointUrl.toString(),
-      model: data.model ?? resolvedConfig.model,
+      model: runs[0].model ?? resolvedConfig.model,
       stateChars: state.length,
       truncated,
+      careful,
+      consensus,
       questions: params.questions.map((q) => ({
         id: q.id,
         instructions: q.instructions.slice(0, 400),
       })),
-      answers: data.answers,
+      answers,
       usage,
       lowConfidence: lows.map((r) => r.id),
       latencyMs,
@@ -560,13 +648,15 @@ async function runAskJeff(params: AskJeffParams, signal?: AbortSignal): Promise<
     details: {
       host,
       url: resolvedConfig.endpointUrl.toString(),
-      model: data.model ?? resolvedConfig.model,
-      answers: data.answers,
+      model: runs[0].model ?? resolvedConfig.model,
+      careful,
+      consensus,
+      answers,
       usage,
       lowConfidence: lows.map((r) => r.id),
       truncated,
       latencyMs,
-      quotaRemaining: data.quota?.remaining,
+      quotaRemaining: runs[0].quota?.remaining,
     },
   };
 }
@@ -583,6 +673,9 @@ HOW TO WRITE STATE (Jeff's only input — this decides the answer):
 - Declarative, not commands: "tests: 47/47 pass" beats "please check the tests".
 - Mark unknowns explicitly as "FACT UNKNOWN: ..." instead of omitting them.
 - If relevant, separate facts from your own opinion with "SELF-ASSESSMENT: ...".
+- Do the math for Jeff: state conclusions as facts ("contrast 2.6:1 vs required 4.5:1 -> contrast fails"); don't ask Jeff to compare numbers.
+- Spell the decision rule: for "pick one", state what the immediate situation demands; for incident gates, state the standard practice.
+- For yes/no questions, provide criteria rubrics — they raise confidence.
 
 WHAT YOU CAN ASK (Jeff infers the shape from what you provide):
 - A yes/no question — just give "instructions". Use for gates: "Is this task completed per its definition?", "Should I delegate this to a subagent?", "Does this button comply with the design rules?".
@@ -595,13 +688,15 @@ BATCHING:
 - Never batch questions that depend on each other's answers (they do not see each other); make follow-up calls instead.
 
 CONFIDENCE:
-- Every answer is a verdict with a confidence percentage. Act on answers at or above the configured threshold (≥ 60% by default); the tool flags lower-confidence answers for verification before you act on them.`;
+- Every answer is a verdict with a confidence percentage. Act on answers at or above the configured threshold (≥ 60% by default); the tool flags lower-confidence answers for verification before you act on them.
+- For extra reliability on high-stakes decisions set "careful": true: each question runs through 3 procedural framings and is majority-voted; split votes are marked (2/3). Costs 3 requests.`;
 
 const PROMPT_GUIDELINES = [
   "Use ask_jeff before declaring a task complete, before delegating to a subagent, and before choosing between subagents.",
   "Write ask_jeff state as concise, self-contained facts — Jeff cannot see this session, your files, or tool results, so include every fact and option Jeff needs.",
   "Act on ask_jeff answers with confidence at or above the configured minConfidence; verify low-confidence answers before acting on them.",
   "Batch only independent ask_jeff questions into one call (done? + delegate? + which agent?); never chain questions that depend on each other's answers.",
+  "Set ask_jeff careful: true for high-stakes gates (completion, delegation, incident choices): the tool majority-votes 3 framings and marks split votes.",
 ];
 
 const ADVISOR_SECTION = `Jeff is your always-right advisor. Jeff gives typed, calibrated decisions only — no prose, no file access; it cannot see this session, so it answers only what you put in its context.
@@ -612,7 +707,7 @@ When to consult Jeff (ask_jeff tool):
 - "Which subagent?" — list the candidates and their capabilities as options.
 - "Does this output comply with the design rules?" — put the rules and the artifact in state.
 
-How to consult: give ask_jeff the minimal state that fully determines the answer — evidence, constraints, criteria, options, exact numbers. Mark unknowns ("FACT UNKNOWN: ..."). Batch independent decisions into one ask_jeff call; never chain questions that depend on each other's answers.
+How to consult: give ask_jeff the minimal state that fully determines the answer — evidence, constraints, criteria, options, exact numbers. Mark unknowns ("FACT UNKNOWN: ..."). Do the math yourself and state conclusions as facts; provide rubrics on yes/no questions. Batch independent decisions into one ask_jeff call; never chain questions that depend on each other's answers. Set careful: true on ask_jeff for high-stakes calls.
 
 Trust answers with confidence at or above minConfidence. When Jeff flags low confidence, verify before acting and say so.`;
 

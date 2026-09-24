@@ -3,6 +3,7 @@
  * Run: node test/unit.ts
  */
 import {
+  aggregateCareful,
   answerConfidence,
   buildJevQuestions,
   buildStatusText,
@@ -137,6 +138,55 @@ check("advisor on by default", info.advisorEnabled === true);
 check("no config problems by default", info.configProblems.length === 0);
 check("remote endpoint requires a key", info.keyRequired === true);
 check("localEndpoint false on remote host", info.localEndpoint === false);
+
+/* ---------- careful mode: framing suffix + majority aggregation ---------- */
+
+const suffixed = buildJevQuestions([{ instructions: "Is it done?" }], " Answer from the facts.");
+check("framing suffix appended to instructions", (suffixed.q1 as { instructions: string }).instructions === "Is it done? Answer from the facts.");
+const unsuffixed = buildJevQuestions([{ instructions: "Is it done?" }]);
+check("no suffix by default", (unsuffixed.q1 as { instructions: string }).instructions === "Is it done?");
+
+const agg1 = aggregateCareful(
+  [
+    { a: { type: "noul", noul: 0.1 } },
+    { a: { type: "noul", noul: 0.2 } },
+    { a: { type: "noul", noul: 0.9 } },
+  ],
+  ["a"],
+);
+check("noul median is robust to an outlier", (agg1.answers.a as { noul: number }).noul === 0.2);
+check("noul consensus 2/3 with one outlier", agg1.consensus.a === 2);
+const agg1row = renderRows(agg1.answers)[0];
+check("median noul renders as No with verdict confidence", agg1row?.line === "a: No — confidence 80%");
+
+const agg2 = aggregateCareful(
+  [
+    { c: { type: "choice", choice: "rollback", confidence: 0.9, probabilities: { rollback: 0.9, hotfix: 0.1 } } },
+    { c: { type: "choice", choice: "rollback", confidence: 0.8, probabilities: { rollback: 0.8, hotfix: 0.2 } } },
+    { c: { type: "choice", choice: "investigate", confidence: 0.7, probabilities: { investigate: 0.7, rollback: 0.3 } } },
+  ],
+  ["c"],
+);
+check("choice majority label wins", (agg2.answers.c as { choice: string }).choice === "rollback");
+check("choice consensus 2/3", agg2.consensus.c === 2);
+check(
+  "choice mean probabilities",
+  Math.abs(((agg2.answers.c as { probabilities: Record<string, number> }).probabilities.rollback ?? 0) - 2 / 3) < 1e-9,
+);
+
+const agg3 = aggregateCareful(
+  [
+    { s: { type: "score", score: 3.4, confidence: 0.8, legend: { "0": "a", "1": "b", "2": "c", "3": "d" } } },
+    { s: { type: "score", score: 3.2, confidence: 0.7, legend: { "0": "a", "1": "b", "2": "c", "3": "d" } } },
+    { s: { type: "score", score: 1.1, confidence: 0.6, legend: { "0": "a", "1": "b", "2": "c", "3": "d" } } },
+  ],
+  ["s"],
+);
+check("score majority level wins (3 vs 1)", Math.round((agg3.answers.s as { score: number }).score) === 3);
+check("score consensus 2/3", agg3.consensus.s === 2);
+
+const aggEmpty = aggregateCareful([{ a: { type: "noul", noul: 0.5 } }], ["missing"]);
+check("missing question ids are skipped", Object.keys(aggEmpty.answers).length === 0);
 
 console.log(failed === 0 ? "\nAll unit checks passed" : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);
