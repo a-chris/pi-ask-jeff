@@ -736,6 +736,7 @@ WHAT YOU CAN ASK (Jeff infers the shape from what you provide):
 - Provide options OR levels, never both.
 
 BATCHING:
+- One question = one judgment: never fuse several concerns (done? + safe? + ship?) into a single instruction — each concern gets its own question in the batch; a blended question returns one mediocre probability that stands for nothing.
 - "questions" may hold several independent decisions sharing the same "state"; they run in parallel in one call (one billing, one latency). Typical batch: "done?" + "delegate?" + "which agent?".
 - Never batch questions that depend on each other's answers (they do not see each other); make follow-up calls instead.
 
