@@ -132,7 +132,7 @@ ASK_JEFF_HOST=von pi            # or "host": "von" in ask-jeff.json
   `ASK_JEFF_API_KEY` (or `apiKey`) to the same value.
 - **Shared von on your LAN**: `http:` is accepted on loopback and RFC1918
   private ranges (`10.x`, `172.16–31.x`, `192.168.x`) — e.g.
-  `ASK_JEFF_URL=http://192.168.1.56:8000/v1/systemone`. http to public
+  `ASK_JEFF_URL=http://192.168.1.10:8000/v1/systemone`. http to public
   internet addresses is rejected.
 - Custom loopback port: `ASK_JEFF_URL=http://127.0.0.1:8123/v1/systemone`.
 - Model defaults to `von-latest` (override with `ASK_JEFF_MODEL` or `model`).
@@ -230,8 +230,8 @@ risk: 0.8 on Low → Medium → High (consensus 2/3) — confidence 47%
 ```
 
 A split vote (`2/3`) tells you the backend was genuinely torn — weigh that
-before acting. This is the reliability machine from `test/von-experiment.ts`
-(6/10 → 10/10 locally) folded into the tool.
+before acting. This is the reliability machine we benchmarked on a local
+engine (6/10 → 10/10) folded into the tool.
 
 Honest caveat: these engines are deterministic per input, so the procedural
 framings produce limited diversity for already-stable answers — the big win in
@@ -258,7 +258,6 @@ request is made are not logged — only actual API attempts.
 ```bash
 node test/unit.ts            # pure-helper smoke tests (no network)
 node test/compare.ts         # bare-HTTP von vs Jev comparison on 10 grounded use cases → test/compare-results.md
-node test/von-experiment.ts   # von-only reliability experiment (state variants + ensemble) → test/von-experiment-results.md
 npx -y -p typescript tsc -p tsconfig.json   # type check
 ```
 

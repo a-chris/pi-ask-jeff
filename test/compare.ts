@@ -1,11 +1,11 @@
 /**
  * Compare pi-ask-jeff use cases across two System One backends using bare HTTP
  * (no pi extension involved):
- *   - von   (local engine) : http://192.168.1.56:8000/v1/systemone
+ *   - von   (local engine) : http://192.168.1.10:8000/v1/systemone
  *   - Jev   (OpenRouter)   : https://openrouter.ai/api/v1/systemone (typesafe/jev-1.13)
  *
  * Run:  node test/compare.ts
- * Env:  VON_URL (default http://192.168.1.56:8000/v1/systemone),
+ * Env:  VON_URL (default http://192.168.1.10:8000/v1/systemone),
  *       JEV_URL (default https://openrouter.ai/api/v1/systemone),
  *       JEV_MODEL (default typesafe/jev-1.13), VON_MODEL (default von-latest),
  *       and the OpenRouter key env var (for Jev only — never sent to von).
@@ -14,7 +14,7 @@
 import { writeFileSync } from "node:fs";
 import { CASES, type Case, type Question } from "./cases.ts";
 
-const VON_URL = process.env.VON_URL ?? "http://192.168.1.56:8000/v1/systemone";
+const VON_URL = process.env.VON_URL ?? "http://192.168.1.10:8000/v1/systemone";
 const JEV_URL = process.env.JEV_URL ?? "https://openrouter.ai/api/v1/systemone";
 const VON_MODEL = process.env.VON_MODEL ?? "von-latest";
 const JEV_MODEL = process.env.JEV_MODEL ?? "typesafe/jev-1.13";

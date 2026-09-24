@@ -7,7 +7,7 @@
  *
  * Variants:
  *   ASK_JEFF_URL=http://127.0.0.1:8000/v1/systemone         (loopback, default)
- *   ASK_JEFF_URL=http://192.168.1.56:8000/v1/systemone      (private LAN)
+ *   ASK_JEFF_URL=http://192.168.1.10:8000/v1/systemone      (private LAN)
  *   ASK_JEFF_URL=http://example.com/v1/systemone            (public http -> rejected)
  *   WIRING_EXPECT=rejected  to assert the public-http rejection case.
  */

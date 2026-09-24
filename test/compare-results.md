@@ -1,11 +1,11 @@
-pi-ask-jeff — backends: von (http://192.168.1.56:8000/v1/systemone) vs Jev (typesafe/jev-1.13 via https://openrouter.ai/api/v1/systemone)
-run: 2026-09-22T21:30:49.509Z · Jev key: set
+pi-ask-jeff — backends: von (http://192.168.1.10:8000/v1/systemone) vs Jev (typesafe/jev-1.13 via https://openrouter.ai/api/v1/systemone)
+run: 2026-09-22T22:25:28.196Z · Jev key: set
 
 ## done1 — Task completion — script missing its required license header
 > Our first live pi-ask-jeff verification: a hello-world script that runs, but the task definition requires a license header and none was added.
 state: Task: add a hello-world script. Task definition: the script must run AND carry a license header. Evidence: A) script file exists B) script runs and prints hello…
 
-- **complete** (expected NO): von → No 80% ✓  ·  jev → No 96% ✓  ·  AGREE
+- **complete** (expected NO): von → No 80% ✓  ·  jev → No 95% ✓  ·  AGREE
 
 ## done2 — Task completion — feature done but required README docs missing
 > Canonical example from the README: OAuth2 login ships but the definition requires documenting the new env vars.
@@ -29,7 +29,7 @@ state: Symptom: a TypeScript runner crashed on an unexpected 'fileMutation' prop
 > From this project's design-compliance gate; matches Chris's rule-first workflow (guidelines defined up front, pages must not drift).
 state: Design rules: (1) primary action has min 44px touch target (2) text contrast must be >= 4.5:1 (3) disabled state must be visibly distinct. Button: 40px tall, gr…
 
-- **ok** (expected NO): von → Yes 65% ✗  ·  jev → No 98% ✓  ·  disagree
+- **ok** (expected NO): von → Yes 65% ✗  ·  jev → No 97% ✓  ·  disagree
 
 ## secret — Secret guard — does this text contain credentials
 > Real event: a memory_add was blocked because the content contained a key-like env var name. The guard is a perfect System One decision.
@@ -47,13 +47,13 @@ state: Change: new HTTP client transport in an agent tool. Coverage: 33 unit tes
 > From the README's rating example (checkout 503s) — an ordered Low->Critical rubric.
 state: Incident: checkout endpoint 503s for 40 minutes during business hours; 2 customers affected; no data loss; rollback ready; root cause unknown. Customers can sti…
 
-- **severity** (expected level 2): von → 1.29 14% ✓ [lvl 1]  ·  jev → 1.96 69% ✓ [lvl 2]  ·  AGREE
+- **severity** (expected level 2): von → 1.29 14% ✓ [lvl 1]  ·  jev → 2 69% ✓ [lvl 2]  ·  AGREE
 
 ## urgent — Handle today — production billing API down in business hours
 > Urgency gate: time-sensitivity of a production payment failure during revenue hours.
 state: Production billing API started returning 500s 25 minutes ago during business hours; ~5% of traffic fails; payment provider integration is the suspect; oncall is…
 
-- **today** (expected YES): von → Yes 61% ✓  ·  jev → Yes 94% ✓  ·  AGREE
+- **today** (expected YES): von → Yes 61% ✓  ·  jev → Yes 93% ✓  ·  AGREE
 
 ## incident — Incident response — roll back, hotfix, or investigate first
 > Classic incident decision gate: the deploy is the likely cause, rollback is ready, customers are affected now.
@@ -64,7 +64,7 @@ state: Production incident: 503s started immediately after the 14:02 deploy; dep
 ## Summary
 | host | cases | matches expectation | avg latency | input tokens |
 |---|---|---|---|---|
-| von | 10/10 | 6/10 | 261ms | 710 |
-| jev | 10/10 | 10/10 | 429ms | 3529 |
+| von | 10/10 | 6/10 | 208ms | 710 |
+| jev | 10/10 | 10/10 | 349ms | 3529 |
 | agreement | 6/10 shared verdicts | — | — | — |
 jev approx cost: $0.000148
