@@ -722,6 +722,7 @@ const TOOL_DESCRIPTION = `Consult Jeff, your advisor, for a high-stakes decision
 HOW TO WRITE STATE (Jeff's only input — this decides the answer):
 - Concise and factual: evidence, constraints, criteria, options, exact numbers. No filler, no politeness, no meta-commentary.
 - Self-contained: Jeff cannot see this chat, your files, or tool results. Include everything Jeff needs; quote exact numbers, code, names, messages.
+- Scope or intent questions ("am I on track?", "is this off-task?", "should I delegate?"): include the original request this work belongs to — the first ask, the goal — not just the latest message. "Now the tests" means nothing without the task it hangs off.
 - Declarative, not commands: "tests: 47/47 pass" beats "please check the tests".
 - Mark unknowns explicitly as "FACT UNKNOWN: ..." instead of omitting them.
 - If relevant, separate facts from your own opinion with "SELF-ASSESSMENT: ...".
